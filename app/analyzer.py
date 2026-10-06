@@ -9,7 +9,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .classifier import classify_crop
+from .catfinder import classify_crop as classify_catfinder
+from .classifier import classify_crop as classify_clip
 
 ANALYSIS_WIDTH = 640
 PLAYBACK_WIDTH = 1280
@@ -173,7 +174,12 @@ def analyze_video(
     sample_fps: float,
     progress_callback: Callable[[float], None],
     source_path: Path | None = None,
+    recognizer: str = "clip",
 ) -> dict:
+    classifiers = {"clip": classify_clip, "catfinder": classify_catfinder}
+    if recognizer not in classifiers:
+        raise ValueError(f"未知识别方案：{recognizer}")
+    classify_crop = classifiers[recognizer]
     source = source_path if source_path is not None else job_dir / "source.dav"
     video_path = job_dir / "video.mp4"
     frames_dir = job_dir / "frames"

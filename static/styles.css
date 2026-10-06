@@ -245,6 +245,27 @@ select:focus-visible,
   font-weight: 400;
 }
 
+.recognizer-field {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.recognizer-field select {
+  min-width: 245px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.recognizer-field small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .primary-button {
   min-width: 190px;
   padding: 13px 22px;
@@ -391,7 +412,7 @@ select:focus-visible,
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 18px;
 }
@@ -543,6 +564,28 @@ select:focus-visible,
 
 .timeline-marker.cat {
   background: var(--cat);
+}
+
+.timeline-marker.selected {
+  z-index: 4;
+  box-shadow: 0 0 0 3px rgba(237, 83, 108, 0.3), 0 1px 5px rgba(23, 32, 51, 0.25);
+  transform: translateX(-50%) scale(1.2);
+}
+
+.timeline-delete {
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 1px solid rgba(237, 83, 108, 0.35);
+  border-radius: 7px;
+  color: var(--cat);
+  background: #fff5f7;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.timeline-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .timeline-marker:hover {
@@ -710,6 +753,33 @@ select:focus-visible,
 .frame-card-heading > strong {
   font-size: 17px;
   font-variant-numeric: tabular-nums;
+}
+
+.frame-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.delete-frame {
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.delete-frame:hover:not(:disabled) {
+  border-color: var(--cat);
+  color: var(--cat);
+  background: #fff5f7;
+}
+
+.delete-frame:disabled {
+  opacity: 0.45;
+  cursor: wait;
 }
 
 .frame-badge {

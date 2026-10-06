@@ -8,6 +8,7 @@ const elements = {
   fileInput: document.getElementById("fileInput"),
   selectedFile: document.getElementById("selectedFile"),
   sampleFps: document.getElementById("sampleFps"),
+  recognizer: document.getElementById("recognizer"),
   analyzeButton: document.getElementById("analyzeButton"),
   localPath: document.getElementById("localPath"),
   analyzePathButton: document.getElementById("analyzePathButton"),
@@ -20,6 +21,7 @@ const elements = {
   resultSection: document.getElementById("resultSection"),
   totalFrames: document.getElementById("totalFrames"),
   maxConfidence: document.getElementById("maxConfidence"),
+  resultRecognizer: document.getElementById("resultRecognizer"),
   videoStage: document.getElementById("videoStage"),
   video: document.getElementById("video"),
   overlay: document.getElementById("overlay"),
@@ -31,6 +33,7 @@ const elements = {
   timelineTrack: document.getElementById("timelineTrack"),
   timelineMarkers: document.getElementById("timelineMarkers"),
   timelinePlayhead: document.getElementById("timelinePlayhead"),
+  deleteTimelineFrame: document.getElementById("deleteTimelineFrame"),
   durationLabel: document.getElementById("durationLabel"),
   threshold: document.getElementById("threshold"),
   thresholdValue: document.getElementById("thresholdValue"),
@@ -54,6 +57,7 @@ let currentPlaybackRate = 1;
 let confidenceThreshold = Number(elements.threshold.value);
 let cardElements = new Map();
 let activeIndex = -1;
+let selectedTimelineIndex = -1;
 let playbackRaf = 0;
 let renderRaf = 0;
 
@@ -102,6 +106,7 @@ function setBusy(value) {
   busy = value;
   elements.fileInput.disabled = value;
   elements.sampleFps.disabled = value;
+  elements.recognizer.disabled = value;
   elements.localPath.disabled = value;
   elements.dropZone.classList.toggle("disabled", value);
   elements.dropZone.setAttribute("aria-disabled", String(value));
@@ -169,6 +174,7 @@ function uploadVideo(file, sampleFps, token) {
     const form = new FormData();
     form.append("file", file);
     form.append("sample_fps", String(sampleFps));
+    form.append("recognizer", elements.recognizer.value);
     request.send(form);
   });
 }
@@ -270,7 +276,11 @@ async function startPathAnalysis() {
     const response = await fetch("/api/jobs/local", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: localPath, sample_fps: sampleFps }),
+      body: JSON.stringify({
+        path: localPath,
+        sample_fps: sampleFps,
+        recognizer: elements.recognizer.value,
+      }),
     });
     let created;
     try {
@@ -364,6 +374,24 @@ function markerSample(visible) {
   return selected.sort((first, second) => first.frame.time - second.frame.time);
 }
 
+function updateTimelineSelection() {
+  if (!currentJob || !currentJob.keyframes[selectedTimelineIndex]) {
+    selectedTimelineIndex = -1;
+  }
+  elements.timelineMarkers.querySelectorAll(".timeline-marker").forEach((marker) => {
+    marker.classList.toggle("selected", Number(marker.dataset.index) === selectedTimelineIndex);
+  });
+  elements.deleteTimelineFrame.disabled = selectedTimelineIndex < 0;
+  elements.deleteTimelineFrame.title = selectedTimelineIndex >= 0
+    ? `删除 ${formatTime(currentJob.keyframes[selectedTimelineIndex].time)} 的假阳性关键帧`
+    : "先点击红色猫标记进行选择";
+}
+
+function selectTimelineFrame(index) {
+  selectedTimelineIndex = index;
+  updateTimelineSelection();
+}
+
 function renderMarkers(visible) {
   const fragment = document.createDocumentFragment();
   const catFrames = visible.filter(({ frame }) => isCatFrame(frame));
@@ -377,12 +405,14 @@ function renderMarkers(visible) {
     marker.setAttribute("aria-label", `跳转到 ${formatTime(frame.time)}`);
     marker.addEventListener("click", (event) => {
       event.stopPropagation();
+      selectTimelineFrame(index);
       seekTo(frame.time);
     });
     marker.dataset.index = String(index);
     fragment.appendChild(marker);
   }
   elements.timelineMarkers.replaceChildren(fragment);
+  updateTimelineSelection();
 }
 
 function renderCards(visible) {
@@ -411,7 +441,16 @@ function renderCards(visible) {
     const badge = document.createElement("span");
     badge.className = `frame-badge${isCatFrame(frame) ? " cat" : ""}`;
     badge.textContent = isCatFrame(frame) ? "疑似猫" : "普通移动";
-    heading.append(time, badge);
+    const actions = document.createElement("div");
+    actions.className = "frame-actions";
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "delete-frame";
+    deleteButton.textContent = "删除";
+    deleteButton.title = "删除这个假阳性关键帧";
+    deleteButton.setAttribute("aria-label", `删除 ${formatTime(frame.time)} 的假阳性关键帧`);
+    actions.append(badge, deleteButton);
+    heading.append(time, actions);
     body.appendChild(heading);
 
     const objects = document.createElement("ul");
@@ -437,8 +476,48 @@ function renderCards(visible) {
   elements.keyframesContainer.replaceChildren(fragment);
 }
 
+async function deleteKeyframe(index, button) {
+  if (!currentJob) return;
+  const job = currentJob;
+  const frame = job.keyframes[index];
+  if (!frame) return;
+  const approved = window.confirm(
+    `删除 ${formatTime(frame.time)} 的假阳性关键帧？\n只会删除检测结果，不会影响视频。`,
+  );
+  if (!approved) return;
+  const filename = frame.imageUrl.split("/").pop();
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      `/api/jobs/${encodeURIComponent(job.jobId)}/keyframes/${encodeURIComponent(filename)}`,
+      { method: "DELETE" },
+    );
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(responseError(data, `删除失败（HTTP ${response.status}）`));
+    if (currentJob !== job) return;
+    job.keyframes = job.keyframes.filter((candidate) => candidate.imageUrl !== frame.imageUrl);
+    elements.totalFrames.textContent = String(job.keyframes.length);
+    let maximum = 0;
+    for (const keyframe of job.keyframes) {
+      for (const box of keyframe.boxes) {
+        maximum = Math.max(maximum, Number(box.catConfidence) || 0);
+      }
+    }
+    elements.maxConfidence.textContent = job.keyframes.length ? formatPercent(maximum) : "—";
+    renderResults();
+  } catch (error) {
+    showError(error instanceof Error ? error.message : String(error));
+  } finally {
+    if (button.isConnected && button.classList.contains("delete-frame")) {
+      button.disabled = false;
+    }
+    updateTimelineSelection();
+  }
+}
+
 function renderResults() {
   if (!currentJob) return;
+  selectTimelineFrame(-1);
   const visible = visibleFrames();
   const pageCount = Math.max(1, Math.ceil(visible.length / CARDS_PER_PAGE));
   currentPage = clamp(Math.round(currentPage), 1, pageCount);
@@ -469,6 +548,9 @@ function showResults(job) {
   currentJob = job;
   currentDuration = Number(job.duration) || 0;
   currentPage = 1;
+  const recognizer = job.recognizer === "catfinder" ? "catfinder" : "clip";
+  elements.recognizer.value = recognizer;
+  elements.resultRecognizer.textContent = recognizer === "catfinder" ? "CatFinder" : "CLIP";
   elements.totalFrames.textContent = String(job.keyframes.length);
   let maximum = 0;
   for (const frame of job.keyframes) {
@@ -702,23 +784,39 @@ elements.nextPage.addEventListener("click", () => {
   elements.keyframesContainer.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
+elements.deleteTimelineFrame.addEventListener("click", () => {
+  if (selectedTimelineIndex < 0) return;
+  deleteKeyframe(selectedTimelineIndex, elements.deleteTimelineFrame);
+});
+
 elements.keyframesContainer.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest(".delete-frame");
   const card = event.target.closest(".frame-card");
   if (!card || !currentJob) return;
+  if (deleteButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteKeyframe(Number(card.dataset.index), deleteButton);
+    return;
+  }
+  selectTimelineFrame(-1);
   const index = Number(card.dataset.index);
   if (currentJob.keyframes[index]) seekTo(currentJob.keyframes[index].time);
 });
 elements.keyframesContainer.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
+  if (event.target.closest(".delete-frame")) return;
   const card = event.target.closest(".frame-card");
   if (!card || !currentJob) return;
   event.preventDefault();
+  selectTimelineFrame(-1);
   const index = Number(card.dataset.index);
   if (currentJob.keyframes[index]) seekTo(currentJob.keyframes[index].time);
 });
 
 elements.timelineTrack.addEventListener("click", (event) => {
   if (currentDuration <= 0) return;
+  selectTimelineFrame(-1);
   const rect = elements.timelineTrack.getBoundingClientRect();
   const fraction = clamp((event.clientX - rect.left) / rect.width, 0, 1);
   seekTo(fraction * currentDuration);

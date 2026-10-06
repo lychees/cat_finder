@@ -50,6 +50,7 @@ class JobManager:
         job_id: str,
         sample_fps: float,
         message: str = "上传完成，等待处理",
+        recognizer: str = "clip",
     ) -> None:
         with self._lock:
             self._jobs[job_id] = {
@@ -58,6 +59,7 @@ class JobManager:
                 "progress": 0.0,
                 "message": message,
                 "sampleFps": sample_fps,
+                "recognizer": recognizer,
             }
 
     def enqueue(self, job_id: str) -> None:
@@ -86,6 +88,32 @@ class JobManager:
             raise KeyError(job_id)
         return result
 
+    def delete_keyframe(self, job_id: str, filename: str) -> int | None:
+        with self._lock:
+            result = self.load_ready_result(job_id)
+            expected_url = f"/api/jobs/{job_id}/frames/{filename}"
+            keyframes = result.get("keyframes", [])
+            remaining = [
+                frame for frame in keyframes if frame.get("imageUrl") != expected_url
+            ]
+            if len(remaining) == len(keyframes):
+                return None
+            result["keyframes"] = remaining
+            result["message"] = f"分析完成，共保留 {len(remaining)} 个移动关键帧"
+            result_path = self.job_dir(job_id) / "result.json"
+            temporary = result_path.with_name("result.json.tmp")
+            with temporary.open("w", encoding="utf-8") as result_file:
+                json.dump(result, result_file, ensure_ascii=False, separators=(",", ":"))
+            os.replace(temporary, result_path)
+            if job_id in self._jobs:
+                self._jobs[job_id] = copy.deepcopy(result)
+            frame_path = self.job_dir(job_id) / "frames" / filename
+            try:
+                frame_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Could not delete keyframe image %s: %s", frame_path, exc)
+            return len(remaining)
+
     def _update(self, job_id: str, **changes) -> None:
         with self._lock:
             if job_id in self._jobs:
@@ -105,6 +133,7 @@ class JobManager:
         try:
             with self._lock:
                 sample_fps = float(self._jobs[job_id]["sampleFps"])
+                recognizer = self._jobs[job_id].get("recognizer", "clip")
             job_dir = self.job_dir(job_id)
             source_path = None
             source_pointer = job_dir / "source_path.txt"
@@ -134,6 +163,7 @@ class JobManager:
                 sample_fps,
                 analysis_progress,
                 source_path=source_path,
+                recognizer=recognizer,
             )
             job_id_prefix = f"/api/jobs/{job_id}"
             keyframes = []
@@ -148,6 +178,7 @@ class JobManager:
                 "progress": 1.0,
                 "message": f"分析完成，共检测到 {len(keyframes)} 个移动关键帧",
                 "sampleFps": sample_fps,
+                "recognizer": recognizer,
                 "duration": analysis["duration"],
                 "videoUrl": f"{job_id_prefix}/video",
                 "keyframes": keyframes,

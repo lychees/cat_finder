@@ -37,6 +37,14 @@
       </div>
 
       <div class="upload-actions">
+        <label class="recognizer-field" for="recognizer">
+          <span>识别方案</span>
+          <select id="recognizer">
+            <option value="clip" selected>CLIP 通用语义（默认）</option>
+            <option value="catfinder">CatFinder 夜视专用（实验）</option>
+          </select>
+          <small>选择只影响本次分析</small>
+        </label>
         <label class="fps-field" for="sampleFps">
           <span>采样 FPS</span>
           <input id="sampleFps" type="number" min="0.5" max="5" step="0.1" value="2" inputmode="decimal">
@@ -73,12 +81,13 @@
           <p class="step-label">第二步</p>
           <h2 id="results-title">查看分析结果</h2>
         </div>
-        <span class="result-hint">点击卡片或时间轴标记跳转播放</span>
+        <span class="result-hint">点击卡片或标记跳转播放，卡片“删除”可移除假阳性</span>
       </div>
 
       <div class="stats-grid">
         <div class="stat-card"><span>移动关键帧</span><strong id="totalFrames">0</strong></div>
         <div class="stat-card"><span>最高猫置信度</span><strong id="maxConfidence">—</strong></div>
+        <div class="stat-card"><span>识别方案</span><strong id="resultRecognizer">CLIP</strong></div>
       </div>
 
       <div class="panel player-panel">
@@ -113,7 +122,10 @@
             <div id="timelinePlayhead" class="timeline-playhead"></div>
           </div>
           <div class="timeline-labels"><span>00:00.0</span><span id="durationLabel">00:00.0</span></div>
-          <div class="legend"><span><i class="legend-dot cat"></i>达到阈值的疑似猫</span></div>
+          <div class="legend">
+            <span><i class="legend-dot cat"></i>达到阈值的疑似猫</span>
+            <button id="deleteTimelineFrame" class="timeline-delete" type="button" title="先点击红色猫标记进行选择" disabled>删除选定点</button>
+          </div>
         </div>
       </div>
 
@@ -148,11 +160,11 @@
 
       <aside class="method-note">
         <strong>如何理解结果</strong>
-        <p>MOG2 背景建模更适合固定摄像头，镜头移动、光照和树影都可能造成误检。猫置信度是 CLIP 在猫、狗、人、车辆和背景等提示类别间的零样本概率估计，并非针对监控场景校准的结果，请结合原画面判断。</p>
+        <p>MOG2 背景建模更适合固定摄像头，镜头移动、光照和树影都可能造成误检。猫置信度由本次选择的 CLIP 或 CatFinder 给出，均未针对当前摄像头校准；CatFinder 偏向红外 CCTV，普通日光场景可能较差，请结合原画面判断。</p>
       </aside>
     </section>
 
-    <footer>视频和结果保存在本机 data 目录，不会上传到第三方服务；首次分析会联网下载公开的 CLIP 模型与分词器。</footer>
+    <footer>视频和结果保存在本机 data 目录，不会上传到第三方服务；首次使用部分识别方案可能需要下载或转换模型。</footer>
   </main>
   <noscript>此应用需要启用 JavaScript 才能上传并查看结果。</noscript>
 </body>

@@ -23,6 +23,13 @@ manager = JobManager(BASE_DIR / "data")
 class LocalJobRequest(BaseModel):
     path: str
     sample_fps: float = 2.0
+    recognizer: str = "clip"
+
+
+def _validate_recognizer(recognizer: str) -> str:
+    if recognizer not in {"clip", "catfinder"}:
+        raise HTTPException(status_code=422, detail="识别方案必须是 clip 或 catfinder")
+    return recognizer
 
 
 @asynccontextmanager
@@ -58,9 +65,11 @@ def _ready_result(job_id: str) -> dict:
 async def create_job(
     file: UploadFile = File(...),
     sample_fps: float = Form(2.0),
+    recognizer: str = Form("clip"),
 ) -> dict:
     if not math.isfinite(sample_fps) or not 0.5 <= sample_fps <= 5:
         raise HTTPException(status_code=422, detail="采样 FPS 必须在 0.5 到 5 之间")
+    recognizer = _validate_recognizer(recognizer)
     original_name = file.filename or ""
     if Path(original_name).suffix.lower() != ".dav":
         raise HTTPException(status_code=400, detail="请选择扩展名为 .dav 的监控视频")
@@ -86,7 +95,7 @@ async def create_job(
     finally:
         await file.close()
 
-    manager.create_job(job_id, sample_fps)
+    manager.create_job(job_id, sample_fps, recognizer=recognizer)
     manager.enqueue(job_id)
     return manager.get_job(job_id)
 
@@ -96,6 +105,7 @@ def create_local_job(request: LocalJobRequest) -> dict:
     sample_fps = request.sample_fps
     if not math.isfinite(sample_fps) or not 0.5 <= sample_fps <= 5:
         raise HTTPException(status_code=422, detail="采样 FPS 必须在 0.5 到 5 之间")
+    recognizer = _validate_recognizer(request.recognizer)
     raw_path = request.path.strip()
     if len(raw_path) >= 2 and raw_path[0] == raw_path[-1] and raw_path[0] in {"'", '"'}:
         raw_path = raw_path[1:-1].strip()
@@ -125,7 +135,12 @@ def create_local_job(request: LocalJobRequest) -> dict:
     except OSError as exc:
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"保存文件路径失败：{exc}") from exc
-    manager.create_job(job_id, sample_fps, message="已连接本机文件，等待处理")
+    manager.create_job(
+        job_id,
+        sample_fps,
+        message="已连接本机文件，等待处理",
+        recognizer=recognizer,
+    )
     manager.enqueue(job_id)
     return manager.get_job(job_id)
 
@@ -163,6 +178,20 @@ def get_frame(job_id: str, filename: str) -> FileResponse:
     if not frame_path.is_file():
         raise HTTPException(status_code=404, detail="关键帧文件不存在")
     return FileResponse(frame_path, media_type="image/jpeg")
+
+
+@app.delete("/api/jobs/{job_id}/keyframes/{filename}")
+def delete_keyframe(job_id: str, filename: str) -> dict:
+    canonical = _canonical_job_id(job_id)
+    if FRAME_NAME.fullmatch(filename) is None:
+        raise HTTPException(status_code=404, detail="关键帧文件名无效")
+    try:
+        remaining = manager.delete_keyframe(canonical, filename)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="分析结果尚未就绪或任务不存在") from exc
+    if remaining is None:
+        raise HTTPException(status_code=404, detail="关键帧不属于该任务或已删除")
+    return {"jobId": canonical, "deleted": filename, "remaining": remaining}
 
 
 @app.get("/", include_in_schema=False)
