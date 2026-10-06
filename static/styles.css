@@ -686,6 +686,22 @@ select:focus-visible,
   accent-color: var(--primary);
 }
 
+.consecutive-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.consecutive-field input {
+  width: 92px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+}
+
 .filter-field {
   display: grid;
   gap: 8px;

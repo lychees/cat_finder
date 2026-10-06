@@ -123,7 +123,7 @@
           </div>
           <div class="timeline-labels"><span>00:00.0</span><span id="durationLabel">00:00.0</span></div>
           <div class="legend">
-            <span><i class="legend-dot cat"></i>达到阈值的疑似猫</span>
+            <span><i class="legend-dot cat"></i><span id="catRuleText">达到阈值的疑似猫</span></span>
             <button id="deleteTimelineFrame" class="timeline-delete" type="button" title="先点击红色猫标记进行选择" disabled>删除选定点</button>
           </div>
         </div>
@@ -137,8 +137,12 @@
           </div>
           <div class="filters">
             <label class="threshold-field" for="threshold">
-              <span>疑似猫阈值 <output id="thresholdValue" for="threshold">30%</output></span>
+              <span>平均猫阈值 <output id="thresholdValue" for="threshold">30%</output></span>
               <input id="threshold" type="range" min="0" max="1" step="0.01" value="0.3">
+            </label>
+            <label class="consecutive-field" for="minConsecutive">
+              <span>至少连续帧</span>
+              <input id="minConsecutive" type="number" min="1" max="50" step="1" value="1" inputmode="numeric">
             </label>
             <label class="filter-field" for="filterMode">
               <span>显示内容</span>

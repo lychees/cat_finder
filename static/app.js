@@ -37,6 +37,8 @@ const elements = {
   durationLabel: document.getElementById("durationLabel"),
   threshold: document.getElementById("threshold"),
   thresholdValue: document.getElementById("thresholdValue"),
+  minConsecutive: document.getElementById("minConsecutive"),
+  catRuleText: document.getElementById("catRuleText"),
   filterMode: document.getElementById("filterMode"),
   visibleCount: document.getElementById("visibleCount"),
   emptyResults: document.getElementById("emptyResults"),
@@ -55,6 +57,8 @@ let currentDuration = 0;
 let currentPage = 1;
 let currentPlaybackRate = 1;
 let confidenceThreshold = Number(elements.threshold.value);
+let minConsecutiveFrames = 1;
+let qualifiedFrameUrls = new Set();
 let cardElements = new Map();
 let activeIndex = -1;
 let selectedTimelineIndex = -1;
@@ -331,10 +335,42 @@ async function resumeJob(jobId) {
   }
 }
 
-function isCatFrame(frame) {
-  return Array.isArray(frame.boxes) && frame.boxes.some(
-    (box) => Number(box.catConfidence) >= confidenceThreshold,
+function frameCatConfidence(frame) {
+  if (!Array.isArray(frame.boxes)) return 0;
+  return frame.boxes.reduce(
+    (maximum, box) => Math.max(maximum, Number(box.catConfidence) || 0),
+    0,
   );
+}
+
+function rebuildCatQualification() {
+  qualifiedFrameUrls = new Set();
+  if (!currentJob) return;
+  const sampleFps = Number(currentJob.sampleFps) || 2;
+  const maximumGap = Math.max(0.75, 1.5 / sampleFps);
+  let window = [];
+  let scoreSum = 0;
+  for (const frame of currentJob.keyframes) {
+    const previous = window[window.length - 1];
+    if (previous && frame.time - previous.frame.time > maximumGap) {
+      window = [];
+      scoreSum = 0;
+    }
+    const score = frameCatConfidence(frame);
+    window.push({ frame, score });
+    scoreSum += score;
+    if (window.length > minConsecutiveFrames) {
+      const removed = window.shift();
+      scoreSum -= removed.score;
+    }
+    if (window.length === minConsecutiveFrames && scoreSum / minConsecutiveFrames >= confidenceThreshold) {
+      for (const item of window) qualifiedFrameUrls.add(item.frame.imageUrl);
+    }
+  }
+}
+
+function isCatFrame(frame) {
+  return qualifiedFrameUrls.has(frame.imageUrl);
 }
 
 function visibleFrames() {
@@ -518,6 +554,10 @@ async function deleteKeyframe(index, button) {
 function renderResults() {
   if (!currentJob) return;
   selectTimelineFrame(-1);
+  rebuildCatQualification();
+  elements.catRuleText.textContent = minConsecutiveFrames > 1
+    ? `连续 ${minConsecutiveFrames} 帧平均 ≥${formatPercent(confidenceThreshold)}`
+    : `单帧 ≥${formatPercent(confidenceThreshold)}`;
   const visible = visibleFrames();
   const pageCount = Math.max(1, Math.ceil(visible.length / CARDS_PER_PAGE));
   currentPage = clamp(Math.round(currentPage), 1, pageCount);
@@ -531,7 +571,7 @@ function renderResults() {
   elements.emptyResults.hidden = visible.length > 0;
   elements.emptyResults.textContent = currentJob.keyframes.length === 0
     ? "没有检测到明显移动。可以尝试提高采样 FPS，或确认摄像头画面保持稳定。"
-    : "当前筛选条件下没有关键帧，可以降低疑似猫阈值或查看全部移动。";
+    : "当前筛选条件下没有关键帧，可以降低阈值、减少连续帧要求或查看全部移动。";
   elements.pagination.hidden = visible.length <= CARDS_PER_PAGE;
   elements.previousPage.disabled = currentPage <= 1;
   elements.nextPage.disabled = currentPage >= pageCount;
@@ -765,6 +805,13 @@ elements.threshold.addEventListener("input", () => {
       renderResults();
     });
   }
+});
+elements.minConsecutive.addEventListener("change", () => {
+  const value = Math.round(Number(elements.minConsecutive.value));
+  minConsecutiveFrames = Number.isFinite(value) ? clamp(value, 1, 50) : 1;
+  elements.minConsecutive.value = String(minConsecutiveFrames);
+  currentPage = 1;
+  renderResults();
 });
 elements.filterMode.addEventListener("change", () => {
   currentPage = 1;
