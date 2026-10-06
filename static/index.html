@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAV 猫影检测</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">CAT</span><span>猫影检测</span></div>
+    <span class="local-badge">本地处理</span>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero">
+      <p class="eyebrow">DAV 监控视频分析</p>
+      <h1>找到监控里出现的猫</h1>
+      <p>上传视频后自动转码、检测移动对象，并估计每个对象是猫的置信度。点击关键帧即可回到对应画面。</p>
+    </section>
+
+    <section class="panel upload-panel" aria-labelledby="upload-title">
+      <div class="section-heading">
+        <div>
+          <p class="step-label">第一步</p>
+          <h2 id="upload-title">选择监控视频</h2>
+        </div>
+        <span class="file-rule">仅支持 .dav；文件大小不限</span>
+      </div>
+
+      <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="选择或拖入 DAV 视频">
+        <input id="fileInput" type="file" accept=".dav" hidden>
+        <div class="drop-icon" aria-hidden="true">DAV</div>
+        <strong id="dropTitle">拖拽视频到这里，或点击选择</strong>
+        <span id="selectedFile" class="selected-file">尚未选择文件</span>
+      </div>
+
+      <div class="upload-actions">
+        <label class="fps-field" for="sampleFps">
+          <span>采样 FPS</span>
+          <input id="sampleFps" type="number" min="0.5" max="5" step="0.1" value="2" inputmode="decimal">
+          <small>每秒抽取的画面数，越高越细致、分析越慢</small>
+        </label>
+        <button id="analyzeButton" class="primary-button" type="button" disabled>上传并开始分析</button>
+      </div>
+
+      <div class="path-alternative">
+        <div class="path-divider">或直接输入本机文件地址（无需上传或复制）</div>
+        <div class="local-path-row">
+          <input id="localPath" class="local-path-input" type="text" placeholder="D:\data\监控\video.dav" aria-label="DAV 文件绝对路径" autocomplete="off" spellcheck="false">
+          <button id="analyzePathButton" class="path-button" type="button" disabled>从路径开始分析</button>
+        </div>
+        <small class="path-note">直接读取原文件，不会上传或复制；分析期间请勿移动、重命名或删除该文件。</small>
+      </div>
+
+      <div id="progressPanel" class="progress-panel" hidden>
+        <div class="progress-copy">
+          <span id="progressStatus">准备上传</span>
+          <strong id="progressPercent">0%</strong>
+        </div>
+        <div id="progressTrack" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+        <small>上传约占前半段进度，首次检测移动对象时还需下载模型，时间可能较长。</small>
+      </div>
+      <div id="errorBox" class="error-box" role="alert" hidden></div>
+    </section>
+
+    <section id="resultSection" class="results" aria-labelledby="results-title" hidden>
+      <div class="section-heading results-heading">
+        <div>
+          <p class="step-label">第二步</p>
+          <h2 id="results-title">查看分析结果</h2>
+        </div>
+        <span class="result-hint">点击卡片或时间轴标记跳转播放</span>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card"><span>移动关键帧</span><strong id="totalFrames">0</strong></div>
+        <div class="stat-card"><span>最高猫置信度</span><strong id="maxConfidence">—</strong></div>
+      </div>
+
+      <div class="panel player-panel">
+        <div id="videoStage" class="video-stage">
+          <video id="video" controls playsinline preload="metadata"></video>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+        </div>
+        <p id="videoError" class="inline-error" hidden>视频加载失败，请确认转码结果仍然存在。</p>
+        <div class="playback-controls">
+          <label for="ratePreset">播放速率</label>
+          <select id="ratePreset" class="rate-preset">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="0.75">0.75×</option>
+            <option value="1" selected>1×（正常）</option>
+            <option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+            <option value="8">8×</option>
+            <option value="custom">自定义</option>
+          </select>
+          <label for="customRate">自定义</label>
+          <input id="customRate" class="custom-rate-input" type="number" min="0.1" max="16" step="0.1" placeholder="0.1–16" inputmode="decimal">
+          <button id="applyCustomRate" class="rate-apply" type="button">应用</button>
+          <output id="currentRate" class="rate-feedback" for="ratePreset customRate">当前 1×</output>
+        </div>
+        <div class="timeline-wrap">
+          <div id="timelineTrack" class="timeline-track" role="slider" aria-label="视频时间轴" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+            <div class="timeline-base"></div>
+            <div id="timelineMarkers" class="timeline-markers"></div>
+            <div id="timelinePlayhead" class="timeline-playhead"></div>
+          </div>
+          <div class="timeline-labels"><span>00:00.0</span><span id="durationLabel">00:00.0</span></div>
+          <div class="legend"><span><i class="legend-dot cat"></i>达到阈值的疑似猫</span></div>
+        </div>
+      </div>
+
+      <div class="panel frames-panel">
+        <div class="frames-toolbar">
+          <div>
+            <h3>关键帧</h3>
+            <span id="visibleCount" class="visible-count">显示 0 个</span>
+          </div>
+          <div class="filters">
+            <label class="threshold-field" for="threshold">
+              <span>疑似猫阈值 <output id="thresholdValue" for="threshold">30%</output></span>
+              <input id="threshold" type="range" min="0" max="1" step="0.01" value="0.3">
+            </label>
+            <label class="filter-field" for="filterMode">
+              <span>显示内容</span>
+              <select id="filterMode">
+                <option value="all">全部移动</option>
+                <option value="cat">仅疑似猫</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="emptyResults" class="empty-results" hidden></div>
+        <div id="keyframesContainer" class="frames-grid"></div>
+        <div id="pagination" class="pagination" hidden>
+          <button id="previousPage" class="pagination-button" type="button">上一页</button>
+          <span id="pageInfo" aria-live="polite">1 / 1 页</span>
+          <button id="nextPage" class="pagination-button" type="button">下一页</button>
+        </div>
+      </div>
+
+      <aside class="method-note">
+        <strong>如何理解结果</strong>
+        <p>MOG2 背景建模更适合固定摄像头，镜头移动、光照和树影都可能造成误检。猫置信度是 CLIP 在猫、狗、人、车辆和背景等提示类别间的零样本概率估计，并非针对监控场景校准的结果，请结合原画面判断。</p>
+      </aside>
+    </section>
+
+    <footer>视频和结果保存在本机 data 目录，不会上传到第三方服务；首次分析会联网下载公开的 CLIP 模型与分词器。</footer>
+  </main>
+  <noscript>此应用需要启用 JavaScript 才能上传并查看结果。</noscript>
+</body>
+</html>
